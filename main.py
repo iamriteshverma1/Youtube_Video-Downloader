@@ -13,8 +13,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-
-DOWNLOAD_DIR = Path("downloads")
 YOUTUBE_HOSTS = {
     "youtube.com",
     "www.youtube.com",
@@ -46,6 +44,33 @@ def format_duration(seconds: int | None) -> str:
     return f"{minutes:02}:{secs:02}"
 
 
+def get_download_directory() -> Path | None:
+    """Ask where to save the download; create the folder if needed."""
+    default_dir = Path.cwd() / "downloads"
+
+    print("\nWhere should the downloaded file be saved?")
+    print(f"Press Enter to use the default: {default_dir}")
+
+    while True:
+        raw_path = input("Save folder path: ").strip()
+
+        if not raw_path:
+            folder = default_dir
+        else:
+            # Allow users to paste a path surrounded by quotation marks.
+            raw_path = raw_path.strip('"').strip("'")
+            folder = Path(raw_path).expanduser()
+
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            if not folder.is_dir():
+                raise NotADirectoryError(f"{folder} is not a folder.")
+            return folder.resolve()
+        except (OSError, ValueError) as error:
+            print(f"Cannot use that folder: {error}")
+            print("Enter another folder path, or press Ctrl+C to cancel.")
+
+
 def get_video_info(url: str) -> dict:
     import yt_dlp
 
@@ -75,7 +100,7 @@ def build_format_selector(
     audio_only: bool = False,
     ffmpeg_available: bool = True,
 ) -> str:
-    """Build a yt-dlp format selector without trying to bypass restrictions."""
+    """Build a yt-dlp format selector."""
     if audio_only:
         return "bestaudio/best"
 
@@ -90,7 +115,7 @@ def build_format_selector(
             f"best[height<={height}]"
         )
 
-    # Without FFmpeg, select a progressive format containing both audio and video.
+    # Without FFmpeg, use a combined audio/video format where available.
     return (
         f"best[height<={height}][vcodec!=none][acodec!=none]/"
         f"best[height<={height}]"
@@ -116,14 +141,12 @@ def show_progress(status: dict) -> None:
         print("\nDownload finished. Processing file if needed...")
 
 
-def download_video(url: str, format_selector: str) -> None:
+def download_video(url: str, format_selector: str, download_dir: Path) -> None:
     import yt_dlp
-
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     options = {
         "format": format_selector,
-        "outtmpl": str(DOWNLOAD_DIR / "%(title).180B [%(id)s].%(ext)s"),
+        "outtmpl": str(download_dir / "%(title).180B [%(id)s].%(ext)s"),
         "noplaylist": True,
         "progress_hooks": [show_progress],
         "continuedl": True,
@@ -136,7 +159,7 @@ def download_video(url: str, format_selector: str) -> None:
         result = downloader.download([url])
 
     if result == 0:
-        print(f"\nSuccess! Check this folder: {DOWNLOAD_DIR.resolve()}")
+        print(f"\nSuccess! Your file was saved in:\n{download_dir}")
     else:
         print("\nThe download did not complete. Check the error above.")
 
@@ -159,8 +182,8 @@ def choose_download(info: dict, ffmpeg_available: bool) -> str | None:
     if not ffmpeg_available:
         print(
             "\nNote: FFmpeg was not found. Separate high-resolution video "
-            "and audio streams cannot be merged. The downloader will use "
-            "a combined audio/video format when available."
+            "and audio streams cannot be merged. A combined audio/video "
+            "format will be used when available."
         )
 
     while True:
@@ -187,46 +210,55 @@ def choose_download(info: dict, ffmpeg_available: bool) -> str | None:
 
 
 def main() -> None:
-    print("=" * 44)
-    print("          TERMINAL VIDEO DOWNLOADER")
-    print("=" * 44)
+    print("=" * 48)
+    print("              VIDEO DOWNLOADER")
+    print("=" * 48)
     print("Use only for content you own or are authorized to download.\n")
 
-    url = input("Paste YouTube URL: ").strip()
-    if not is_valid_youtube_url(url):
-        print("Invalid URL. Please enter a valid YouTube URL.")
-        return
-
-    print("\nFetching video information...")
     try:
-        info = get_video_info(url)
-    except Exception as error:
-        print(f"\nCould not retrieve video information: {error}")
-        return
+        url = input("Paste YouTube URL: ").strip()
+        if not is_valid_youtube_url(url):
+            print("Invalid URL. Please enter a valid YouTube URL.")
+            return
 
-    print("\nTitle:   ", info.get("title", "Unknown"))
-    print("Duration:", format_duration(info.get("duration")))
-    print("Uploader:", info.get("uploader", "Unknown"))
+        print("\nFetching video information...")
+        try:
+            info = get_video_info(url)
+        except Exception as error:
+            print(f"\nCould not retrieve video information: {error}")
+            return
 
-    ffmpeg_available = shutil.which("ffmpeg") is not None
-    selected_format = choose_download(info, ffmpeg_available)
+        print("\nTitle:   ", info.get("title", "Unknown"))
+        print("Duration:", format_duration(info.get("duration")))
+        print("Uploader:", info.get("uploader", "Unknown"))
 
-    if selected_format is None:
-        print("Cancelled.")
-        return
+        ffmpeg_available = shutil.which("ffmpeg") is not None
+        selected_format = choose_download(info, ffmpeg_available)
 
-    print("\nStarting download...")
-    try:
-        download_video(url, selected_format)
+        if selected_format is None:
+            print("Cancelled.")
+            return
+
+        download_dir = get_download_directory()
+        if download_dir is None:
+            return
+
+        print(f"\nSaving to: {download_dir}")
+        print("\nStarting download...")
+        try:
+            download_video(url, selected_format, download_dir)
+        except KeyboardInterrupt:
+            print("\nDownload cancelled by user.")
+        except Exception as error:
+            print(f"\nDownload failed: {error}")
+            print(
+                "Check your internet connection, update yt-dlp, and make sure "
+                "the video is accessible to you."
+            )
     except KeyboardInterrupt:
-        print("\nDownload cancelled by user.")
-    except Exception as error:
-        print(f"\nDownload failed: {error}")
-        print(
-            "Check your internet connection, update yt-dlp, and make sure "
-            "the video is accessible to you."
-        )
+        print("\n\nCancelled by user.")
 
 
 if __name__ == "__main__":
     main()
+    input("\nPress Enter to close...")
