@@ -1,8 +1,9 @@
 """
 Terminal YouTube downloader.
 
-Use only for videos you own or have permission to download.
-This project does not bypass DRM, paywalls, sign-in requirements, or other access controls.
+Use only for videos you own or have permission to download, and in ways
+permitted by the platform's terms. This project does not bypass DRM,
+paywalls, sign-in requirements, or other access controls.
 """
 
 from __future__ import annotations
@@ -44,40 +45,13 @@ def format_duration(seconds: int | None) -> str:
     return f"{minutes:02}:{secs:02}"
 
 
-def get_download_directory() -> Path | None:
-    """Ask where to save the download; create the folder if needed."""
-    default_dir = Path.cwd() / "downloads"
-
-    print("\nWhere should the downloaded file be saved?")
-    print(f"Press Enter to use the default: {default_dir}")
-
-    while True:
-        raw_path = input("Save folder path: ").strip()
-
-        if not raw_path:
-            folder = default_dir
-        else:
-            # Allow users to paste a path surrounded by quotation marks.
-            raw_path = raw_path.strip('"').strip("'")
-            folder = Path(raw_path).expanduser()
-
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            if not folder.is_dir():
-                raise NotADirectoryError(f"{folder} is not a folder.")
-            return folder.resolve()
-        except (OSError, ValueError) as error:
-            print(f"Cannot use that folder: {error}")
-            print("Enter another folder path, or press Ctrl+C to cancel.")
-
-
-def get_video_info(url: str) -> dict:
+def get_video_info(url: str, download_playlist: bool = False) -> dict:
     import yt_dlp
 
     options = {
         "quiet": True,
         "no_warnings": True,
-        "noplaylist": True,
+        "noplaylist": not download_playlist,
         "skip_download": True,
     }
     with yt_dlp.YoutubeDL(options) as downloader:
@@ -89,10 +63,19 @@ def get_available_qualities(info: dict) -> list[int]:
     heights = {
         int(item["height"])
         for item in info.get("formats", [])
-        if item.get("height")
-        and item.get("vcodec") not in (None, "none")
+        if item.get("height") and item.get("vcodec") not in (None, "none")
     }
     return sorted(heights)
+
+
+def get_representative_video_info(info: dict) -> dict:
+    """For a playlist, use the first available entry to display quality choices."""
+    if info.get("_type") == "playlist":
+        for entry in info.get("entries") or []:
+            if entry:
+                return entry
+        return {}
+    return info
 
 
 def build_format_selector(
@@ -100,7 +83,7 @@ def build_format_selector(
     audio_only: bool = False,
     ffmpeg_available: bool = True,
 ) -> str:
-    """Build a yt-dlp format selector."""
+    """Build a yt-dlp selector for formats that are actually offered."""
     if audio_only:
         return "bestaudio/best"
 
@@ -115,11 +98,42 @@ def build_format_selector(
             f"best[height<={height}]"
         )
 
-    # Without FFmpeg, use a combined audio/video format where available.
     return (
         f"best[height<={height}][vcodec!=none][acodec!=none]/"
         f"best[height<={height}]"
     )
+
+
+def ask_destination() -> Path | None:
+    """Ask for a destination folder and create it if needed."""
+    while True:
+        raw_path = input(
+            "\nEnter the folder path where you want to save files "
+            "(press Enter for Downloads, or q to cancel): "
+        ).strip()
+
+        if raw_path.lower() == "q":
+            return None
+
+        if not raw_path:
+            destination = Path.home() / "Downloads" / "YouTubeDownloader"
+        else:
+            # Remove surrounding quotes, which are common when copying Windows paths.
+            raw_path = raw_path.strip('"').strip("'")
+            try:
+                destination = Path(raw_path).expanduser()
+            except (OSError, ValueError):
+                print("That folder path is not valid. Try again.")
+                continue
+
+        try:
+            destination.mkdir(parents=True, exist_ok=True)
+            if not destination.is_dir():
+                print("The selected path is not a folder. Try again.")
+                continue
+            return destination.resolve()
+        except OSError as error:
+            print(f"Could not use that folder: {error}")
 
 
 def show_progress(status: dict) -> None:
@@ -129,7 +143,7 @@ def show_progress(status: dict) -> None:
 
         if total:
             percent = downloaded * 100 / total
-            message = f"\rDownloading: {percent:5.1f}%"
+            message = f"\rDownloading current file: {percent:5.1f}%"
         else:
             megabytes = downloaded / (1024 * 1024)
             message = f"\rDownloaded: {megabytes:.1f} MB"
@@ -138,34 +152,105 @@ def show_progress(status: dict) -> None:
         sys.stdout.flush()
 
     elif status.get("status") == "finished":
-        print("\nDownload finished. Processing file if needed...")
+        print("\nFile downloaded. Processing if needed...")
 
 
-def download_video(url: str, format_selector: str, download_dir: Path) -> None:
+def make_progress_hook():
+    """Return a hook that reports playlist item numbers when available."""
+    def hook(status: dict) -> None:
+        info = status.get("info_dict") or {}
+        playlist_index = info.get("playlist_index")
+        playlist_count = info.get("n_entries")
+        if playlist_index:
+            if playlist_count:
+                prefix = f"\nPlaylist item {playlist_index}/{playlist_count}: "
+            else:
+                prefix = f"\nPlaylist item {playlist_index}: "
+            if status.get("status") == "downloading":
+                sys.stdout.write(prefix)
+                sys.stdout.flush()
+        show_progress(status)
+
+    return hook
+
+
+def download_media(
+    url: str,
+    format_selector: str,
+    destination: Path,
+    download_playlist: bool,
+    audio_only: bool,
+) -> None:
     import yt_dlp
 
     options = {
         "format": format_selector,
-        "outtmpl": str(download_dir / "%(title).180B [%(id)s].%(ext)s"),
-        "noplaylist": True,
-        "progress_hooks": [show_progress],
+        "outtmpl": str(
+            destination / "%(playlist_title)s/" 
+            "%(playlist_index)03d - %(title).180B [%(id)s].%(ext)s"
+            if download_playlist
+            else destination / "%(title).180B [%(id)s].%(ext)s"
+        ),
+        "noplaylist": not download_playlist,
+        "progress_hooks": [make_progress_hook()],
         "continuedl": True,
         "retries": 3,
         "fragment_retries": 3,
         "windowsfilenames": True,
+        "ignoreerrors": False,
     }
+
+    if audio_only:
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError(
+                "FFmpeg was not found. Audio-only MP3 conversion requires "
+                "FFmpeg. Install FFmpeg and add it to PATH, then reopen "
+                "the terminal."
+            )
+        options["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ]
 
     with yt_dlp.YoutubeDL(options) as downloader:
         result = downloader.download([url])
 
     if result == 0:
-        print(f"\nSuccess! Your file was saved in:\n{download_dir}")
+        print(f"\nSuccess! Files saved in: {destination}")
     else:
         print("\nThe download did not complete. Check the error above.")
 
 
-def choose_download(info: dict, ffmpeg_available: bool) -> str | None:
+def choose_download(
+    info: dict,
+    ffmpeg_available: bool,
+) -> tuple[str, bool] | None:
     qualities = get_available_qualities(info)
+
+    print("\nChoose download type:")
+    print("1. Video")
+    print("2. Audio only (MP3)")
+
+    while True:
+        media_choice = input("Enter 1 or 2 (or q to quit): ").strip().lower()
+        if media_choice == "q":
+            return None
+        if media_choice in {"1", "2"}:
+            break
+        print("Please enter 1 or 2.")
+
+    if media_choice == "2":
+        if not ffmpeg_available:
+            print(
+                "\nFFmpeg is required to convert audio to MP3, but it was "
+                "not found on this computer."
+            )
+            print("Install FFmpeg, add it to PATH, and run the app again.")
+            return None
+        return build_format_selector(audio_only=True), True
 
     print("\nAvailable video qualities:")
     if qualities:
@@ -175,19 +260,17 @@ def choose_download(info: dict, ffmpeg_available: bool) -> str | None:
         print("No video quality information was provided.")
 
     best_option = len(qualities) + 1
-    audio_option = len(qualities) + 2
     print(f"{best_option}. Best available quality")
-    print(f"{audio_option}. Audio only")
 
     if not ffmpeg_available:
         print(
-            "\nNote: FFmpeg was not found. Separate high-resolution video "
-            "and audio streams cannot be merged. A combined audio/video "
-            "format will be used when available."
+            "\nNote: FFmpeg was not found. The downloader will use a "
+            "combined audio/video format when available. Some high "
+            "resolutions may not be available."
         )
 
     while True:
-        raw_choice = input("\nChoose an option (or q to quit): ").strip().lower()
+        raw_choice = input("\nChoose a quality (or q to quit): ").strip().lower()
         if raw_choice == "q":
             return None
 
@@ -198,67 +281,106 @@ def choose_download(info: dict, ffmpeg_available: bool) -> str | None:
             continue
 
         if 1 <= choice <= len(qualities):
-            return build_format_selector(
-                height=qualities[choice - 1],
-                ffmpeg_available=ffmpeg_available,
+            return (
+                build_format_selector(
+                    height=qualities[choice - 1],
+                    ffmpeg_available=ffmpeg_available,
+                ),
+                False,
             )
         if choice == best_option:
-            return build_format_selector(ffmpeg_available=ffmpeg_available)
-        if choice == audio_option:
-            return build_format_selector(audio_only=True)
+            return (build_format_selector(ffmpeg_available=ffmpeg_available), False)
         print("Invalid choice. Try again.")
 
 
+def ask_playlist_mode(info: dict) -> bool:
+    """Return True when the user wants the full playlist."""
+    if info.get("_type") != "playlist":
+        return False
+
+    entries = info.get("entries") or []
+    count = info.get("playlist_count") or len(entries)
+    title = info.get("title") or "Untitled playlist"
+
+    print(f"\nPlaylist detected: {title}")
+    print(f"Videos listed: {count if count else 'Unknown'}")
+    print("\n1. Download the complete playlist")
+    print("2. Download only the video from this URL")
+
+    while True:
+        choice = input("Choose 1 or 2 (or q to quit): ").strip().lower()
+        if choice == "q":
+            raise KeyboardInterrupt
+        if choice == "1":
+            return True
+        if choice == "2":
+            return False
+        print("Please enter 1 or 2.")
+
+
 def main() -> None:
-    print("=" * 48)
-    print("              VIDEO DOWNLOADER")
-    print("=" * 48)
+    print("=" * 50)
+    print("             TERMINAL VIDEO DOWNLOADER")
+    print("=" * 50)
     print("Use only for content you own or are authorized to download.\n")
 
+    url = input("Paste YouTube video or playlist URL: ").strip()
+    if not is_valid_youtube_url(url):
+        print("Invalid URL. Please enter a valid YouTube URL.")
+        return
+
+    print("\nFetching video information...")
     try:
-        url = input("Paste YouTube URL: ").strip()
-        if not is_valid_youtube_url(url):
-            print("Invalid URL. Please enter a valid YouTube URL.")
-            return
+        # Initially inspect the URL as a single item. If it is a playlist,
+        # ask the user before fetching the full playlist.
+        info = get_video_info(url, download_playlist=True)
+    except Exception as error:
+        print(f"\nCould not retrieve video information: {error}")
+        return
 
-        print("\nFetching video information...")
-        try:
-            info = get_video_info(url)
-        except Exception as error:
-            print(f"\nCould not retrieve video information: {error}")
-            return
-
-        print("\nTitle:   ", info.get("title", "Unknown"))
-        print("Duration:", format_duration(info.get("duration")))
-        print("Uploader:", info.get("uploader", "Unknown"))
-
-        ffmpeg_available = shutil.which("ffmpeg") is not None
-        selected_format = choose_download(info, ffmpeg_available)
-
-        if selected_format is None:
-            print("Cancelled.")
-            return
-
-        download_dir = get_download_directory()
-        if download_dir is None:
-            return
-
-        print(f"\nSaving to: {download_dir}")
-        print("\nStarting download...")
-        try:
-            download_video(url, selected_format, download_dir)
-        except KeyboardInterrupt:
-            print("\nDownload cancelled by user.")
-        except Exception as error:
-            print(f"\nDownload failed: {error}")
-            print(
-                "Check your internet connection, update yt-dlp, and make sure "
-                "the video is accessible to you."
-            )
+    try:
+        download_playlist = ask_playlist_mode(info)
     except KeyboardInterrupt:
-        print("\n\nCancelled by user.")
+        print("\nCancelled.")
+        return
+
+    representative = get_representative_video_info(info)
+    print("\nTitle:   ", info.get("title") or representative.get("title", "Unknown"))
+    print("Duration:", format_duration(representative.get("duration")))
+    print("Uploader:", representative.get("uploader", "Unknown"))
+
+    ffmpeg_available = shutil.which("ffmpeg") is not None
+    selected = choose_download(representative, ffmpeg_available)
+    if selected is None:
+        print("Cancelled.")
+        return
+
+    selected_format, audio_only = selected
+    destination = ask_destination()
+    if destination is None:
+        print("Cancelled.")
+        return
+
+    print(f"\nSave location: {destination}")
+    print("\nStarting download...")
+    try:
+        download_media(
+            url=url,
+            format_selector=selected_format,
+            destination=destination,
+            download_playlist=download_playlist,
+            audio_only=audio_only,
+        )
+    except KeyboardInterrupt:
+        print("\nDownload cancelled by user.")
+    except Exception as error:
+        print(f"\nDownload failed: {error}")
+        print(
+            "Check your internet connection, update yt-dlp, confirm the "
+            "content is accessible to you, and verify that FFmpeg is "
+            "installed if you selected MP3 or high-resolution video."
+        )
 
 
 if __name__ == "__main__":
     main()
-    input("\nPress Enter to close...")
