@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# Downloaded media (do not commit videos)
+downloads/
+*.mp4
+*.mkv
+*.webm
+*.mp3
+*.m4a
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
