@@ -1,109 +1,257 @@
-# Terminal Video Downloader
+# YouTube Downloader
 
-A small Python command-line project that displays available video resolutions and lets you select a quality or audio-only format.
-
-> **Responsible use:** Download only videos you own or have explicit permission to download, and only where the platform permits it. Respect copyright and YouTube's Terms of Service. This project does not bypass DRM, paywalls, sign-in requirements, or other access controls.
+A lightweight, terminal-based YouTube downloader built with Python. It supports individual videos, complete playlists, video quality selection, and audio-only downloads in MP3 format.
 
 ## Features
 
-- Accepts a YouTube URL in the terminal
-- Checks that the URL uses a supported YouTube domain
-- Displays the title, uploader, and duration
-- Detects available video heights (for example, 360p, 720p, and 1080p)
-- Offers a selected resolution, best available quality, or audio-only download
-- Shows download progress
-- Saves files in the local `downloads/` folder
-- Disables playlist downloads by default
-- Retries some network and fragment failures
+- Download individual videos.
+- Download complete playlists.
+- Select available video quality (360p, 480p, 720p, 1080p, etc.).
+- Download audio only in MP3 format.
+- Choose a custom folder to save downloaded files.
+- Display download progress in the terminal.
+- Generate a standalone Windows `.exe` application.
 
-## Requirements
+**Important:** Use this application only for content you own or have permission to download, and in accordance with YouTube's terms. It does not bypass DRM, paywalls, sign-in requirements, or other access controls.
 
-- Python 3.10 or newer
-- Internet connection
-- FFmpeg (recommended for merging separate video and audio streams)
+---
 
-## Windows setup (VS Code / PowerShell)
+## 1. Requirements
 
-### 1. Open the project folder
+Make sure you have the following installed:
 
-```powershell
-cd path\to\youtube-downloader
-```
+- Python 3.10 or later
+- FFmpeg
+- Deno (recommended for yt-dlp JavaScript support)
+- Windows 10/11 (for the Windows executable)
 
-### 2. Create and activate a virtual environment
+### Install Python
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
+Download Python from:
 
-If PowerShell blocks activation, use Command Prompt instead:
+https://www.python.org/downloads/
 
-```cmd
-.venv\Scripts\activate.bat
-```
+During installation, enable **Add Python to PATH**.
 
-### 3. Install Python dependencies
+### Install FFmpeg
+
+Open PowerShell and run:
 
 ```powershell
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+winget install Gyan.FFmpeg
 ```
 
-### 4. Install FFmpeg
-
-Install FFmpeg and add its `bin` directory to your Windows PATH. Open a new terminal and check:
+Verify the installation:
 
 ```powershell
 ffmpeg -version
 ```
 
-FFmpeg is recommended because some high-resolution videos provide video and audio as separate streams. Without FFmpeg, the program tries to select a combined audio/video format, which may limit the maximum available resolution. Audio-only mode downloads the best available audio stream without converting it to MP3.
+FFmpeg is required for:
+- Converting audio to MP3.
+- Merging separate video and audio streams.
 
-### 5. Run the project
+### Install Deno
+
+Deno provides JavaScript runtime support for yt-dlp.
 
 ```powershell
+winget install DenoLand.Deno
+```
+
+Verify:
+
+```powershell
+deno --version
+```
+
+Restart your terminal after installing external tools.
+
+---
+
+## 2. Clone the Repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/youtube-downloader.git
+```
+
+Move into the project directory:
+
+```bash
+cd youtube-downloader
+```
+
+Replace `YOUR_USERNAME` with your GitHub username.
+
+---
+
+## 3. Create a Virtual Environment
+
+Create the environment:
+
+```bash
+python -m venv .venv
+```
+
+Activate it on Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation, you can use Command Prompt:
+
+```cmd
+.venv\Scripts\activate.bat
+```
+
+---
+
+## 4. Install Python Dependencies
+
+Upgrade pip:
+
+```bash
+python -m pip install --upgrade pip
+```
+
+Install all project dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+The `requirements.txt` file contains:
+
+```txt
+yt-dlp[default]>=2025.1.15
+pyinstaller>=6.0
+```
+
+---
+
+## 5. Run the Application
+
+Start the downloader:
+
+```bash
 python main.py
 ```
 
-Paste a YouTube URL, inspect the available qualities, and enter the number for the format you want.
+### Download options
 
-## Project structure
+The application supports:
+
+1. Individual video downloads.
+2. Complete playlist downloads.
+3. Video quality selection.
+4. Audio-only downloads in MP3 format.
+5. Custom download destination.
+
+Enter the destination folder when prompted.
+
+Example:
+
+```text
+D:\My Videos
+```
+
+If you leave the destination blank, the default folder is:
+
+```text
+%USERPROFILE%\Downloads\YouTubeDownloader
+```
+
+---
+
+## 6. Generate a Windows EXE
+
+You can convert the Python application into a standalone executable using PyInstaller.
+
+Run:
+
+```powershell
+pyinstaller --clean --onefile --console --name YouTubeDownloader --collect-all yt_dlp main.py
+```
+
+After the build completes, the executable will be available at:
+
+```text
+dist\YouTubeDownloader.exe
+```
+
+Copy `YouTubeDownloader.exe` to your desktop.
+
+Double-click it to launch the terminal application without opening VS Code.
+
+**Note:** FFmpeg and Deno are external dependencies and may need to be installed separately on the computer running the executable. The executable bundles Python and the packaged Python dependencies, not necessarily these external tools.
+
+---
+
+## 7. Project Structure
 
 ```text
 youtube-downloader/
+│
 ├── main.py
 ├── requirements.txt
 ├── README.md
 ├── LICENSE
 ├── .gitignore
-└── tests/
-    └── test_helpers.py
+│
+├── tests/
+│   └── test_helpers.py
+│
+├── build/
+│
+└── dist/
+    └── YouTubeDownloader.exe
 ```
 
-Downloaded media is saved under `downloads/`. That folder is intentionally excluded from Git.
+---
 
-## Run tests
+## 8. Troubleshooting
+
+### FFmpeg not found
+
+Check:
 
 ```powershell
-python -m unittest discover -s tests -v
+ffmpeg -version
 ```
 
-## Update yt-dlp
+If the command is not recognized, verify that FFmpeg is installed and its `bin` directory is included in your PATH.
 
-Websites can change their delivery formats. If extraction stops working, update yt-dlp:
+### Deno not found
+
+Check:
 
 ```powershell
-python -m pip install --upgrade yt-dlp
+deno --version
 ```
 
-## Troubleshooting
+Restart your terminal after installation.
 
-- **FFmpeg not found:** Install FFmpeg, add its `bin` folder to PATH, and restart the terminal.
-- **No formats found:** The video may be unavailable, restricted, or not accessible to your account.
-- **Extraction errors:** Update yt-dlp and retry. Do not attempt to bypass access restrictions.
-- **PowerShell activation error:** Use the Command Prompt activation command shown above.
+### Update yt-dlp
 
-## License
+If video information cannot be retrieved, update yt-dlp:
 
-MIT. See [LICENSE](LICENSE).
+```powershell
+python -m pip install --upgrade "yt-dlp[default]"
+```
+
+### Download or format errors
+
+- Check your internet connection.
+- Confirm that the content is accessible to you.
+- Check the available video qualities.
+- Update yt-dlp.
+- Make sure FFmpeg is installed when merging or converting media.
+
+---
+
+## 9. License
+
+This project is intended for educational and personal use. See the `LICENSE` file for licensing information.
+
+Always respect copyright, content ownership, and the platform's terms of service.
